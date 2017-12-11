@@ -1,0 +1,11 @@
+FROM centos:7
+MAINTAINER a.goncharov@magelan.ru
+
+RUN yum install -y mc
+	
+RUN yum -y install wget \
+	&& yum clean all 
+
+COPY ./html2pdf /html2pdf
+
+EXPOSE 4652
