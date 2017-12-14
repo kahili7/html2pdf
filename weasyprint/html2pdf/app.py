@@ -1,70 +1,48 @@
-import os, re
-import shutil
+import os
+import logging.config
 import uuid
 
-from wsgiref.simple_server import make_server
-from pyramid.config import Configurator
-from pyramid.response import FileResponse
-from jinja2 import Environment, FileSystemLoader
+from flask import Flask, render_template, request, make_response
 from weasyprint import HTML
 
 app_dir = os.path.dirname(os.path.realpath(__file__))
+conf_dir = os.path.join(app_dir, 'conf')
 res_dir = os.path.join(app_dir, 'resources')
 css_dir = os.path.join(res_dir, 'css')
-tpl_dir = os.path.join(res_dir, 'templates')
 
-def PurgePDF(dir):
-    for f in os.listdir(dir):
-        if re.search('\.pdf$', f):
-            os.remove(os.path.join(dir, f))
+logging.config.fileConfig(conf_dir + "/log.conf")
+logger = logging.getLogger("app")
+app_flask = Flask(__name__)
 
-def GetTpl(name):
-    pkg_dir = os.path.dirname(os.path.abspath(name))
-    name = os.path.basename(name)
-    return Environment(loader=FileSystemLoader(pkg_dir)).get_template(name)
-
-def Index(request):
-    tpl = GetTpl(tpl_dir + '/index.tpl')
+@app_flask.route("/", methods=['POST', 'GET'])
+def index():
+    logger.info("--Program started INDEX--")
 
     for d, dirs, files in os.walk(css_dir):
         break
 
-    html_tpl = {'options': dict.fromkeys(dirs)}
-    with open(res_dir + "/index.html", "w") as fn:
-        fn.write(tpl.render(html_tpl))
+    html_tpl = {'options': dict.fromkeys(dirs), 'code': dirs[0]}
+    logger.info("   Read list of directories")
+    logger.info("--Done INDEX--")
+    return render_template("index.html", **html_tpl)
 
-    return FileResponse(res_dir + "/index.html", request=request, content_type='text/html', content_encoding='UTF-8')
+@app_flask.route("/h2p/<code>", methods=['POST'])
+def h2p(code):
 
-def Html2Pdf(request):
-    tfile_path = os.path.join(css_dir, request.matchdict['code'])
-    file_path = os.path.join(tfile_path, '%s.html' % uuid.uuid4())
-    tmp_file_path = file_path + '~'
+    if not bool(request.files["fileselect"].filename):
+        logger.info("File not found!!!")
+        return "<p>File not found!!!</p>"
 
-    PurgePDF(tfile_path)
+    fname = "%s.html" % uuid.uuid4()
+    f = request.files['fileselect']
+    bs_dir = os.path.join(css_dir, code)
 
-    input_file = request.POST['fileselect'].file
-    input_file.seek(0)
+    pdf = HTML(string=f, base_url=bs_dir).write_pdf()
 
-    with open(tmp_file_path, "wb") as output_file:
-        shutil.copyfileobj(input_file, output_file)
+    rsp = make_response(pdf)
+    rsp.headers['Content-Type'] = 'application/pdf'
+    rsp.headers['Content-Disposition'] = 'inline; filename=%s.pdf' % fname
+    return rsp
 
-    os.rename(tmp_file_path, file_path)
-
-    HTML(filename=file_path).write_pdf(file_path + '.pdf')
-    return FileResponse(file_path + '.pdf', request=request, content_type='application/pdf')
-
-def main():
-    with Configurator() as conf:
-        conf.add_route('index', '/')
-        conf.add_view(Index, route_name='index')
-
-        conf.add_route('html2pdf', '/html2pdf/{code}')
-        conf.add_view(Html2Pdf, route_name='html2pdf')
-
-        app = conf.make_wsgi_app()
-
-    server = make_server('0.0.0.0', 4652, app)
-    server.serve_forever()
-
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    app_flask.run(host='0.0.0.0')
